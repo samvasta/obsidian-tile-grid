@@ -1,4 +1,32 @@
-/* Sets all the text color to red! */
-body {
-    color: red;
+.tilegrid.container {
+	display: grid;
+	border: 1px solid currentColor;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-width: 200px;
+}
+.tilegrid.cell {
+	aspect-ratio: 1;
+	place-self: center;
+	width: 100%;
+	height: 100%;
+	display: grid;
+	align-items: stretch;
+	justify-content: stretch;
+	padding: 10%;
+}
+
+.tilegrid .dark {
+	background-color: #aaa;
+}
+
+.tilegrid .light {
+	background-color: #ddd;
+}
+
+img .tilegrid {
+	object-fit: contain;
+	width: 85%;
+	height: 85%;
 }

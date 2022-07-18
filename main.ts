@@ -1,137 +1,202 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { MarkdownPostProcessorContext, Plugin } from "obsidian";
+
+type GridRow = {
+	cellContents: string[];
+};
 
 // Remember to rename these classes and interfaces!
 
-interface MyPluginSettings {
+interface TileGridPluginSettings {
 	mySetting: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+const DEFAULT_SETTINGS: TileGridPluginSettings = {
+	mySetting: "default",
+};
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class TileGridPlugin extends Plugin {
+	settings: TileGridPluginSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.registerMarkdownCodeBlockProcessor("tiles", this.postprocessor);
 	}
 
-	onunload() {
-
-	}
+	onunload() {}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async postprocessor(
+		source: string,
+		el: HTMLElement,
+		ctx: MarkdownPostProcessorContext
+	) {
+		try {
+			const [definitions, grid] = source.split("===");
+			const tokenToSrc: Map<string, string> = new Map<string, string>();
+
+			if (!definitions) {
+				throw new Error(
+					"You're missing the definitions section. Definitions and grid sections should be split with '==='"
+				);
+			}
+			if (!grid) {
+				throw new Error(
+					"You're missing the grid section. Definitions and grid sections should be split with '==='"
+				);
+			}
+
+			definitions
+				.split("\n")
+				.filter((line) => line.trim().length > 1)
+				.forEach((line, index) => {
+					const idx = line.indexOf("=");
+					const token = line.substring(0, idx);
+					const src = line.substring(idx + 1);
+
+					if (!token || !src) {
+						throw new Error(
+							`Could not parse definition at line ${
+								index + 1
+							} (${line}). The format is '{{token}}={{content or url}}'`
+						);
+					}
+					tokenToSrc.set(token, src);
+				});
+
+			let maxWidth = 0;
+			const rows: GridRow[] = [];
+			grid.trim()
+				.split("\n")
+				.forEach((line) => {
+					const row: GridRow = {
+						cellContents: [] as string[],
+					};
+					maxWidth = Math.max(maxWidth, line.length);
+
+					for (const char of line) {
+						row.cellContents.push(tokenToSrc.get(char) || "");
+					}
+					rows.push(row);
+				});
+
+			const container = el.createEl("div");
+			container.addClass("tilegrid", "container");
+			container.style.gridTemplateColumns = "1fr "
+				.repeat(maxWidth)
+				.trim();
+
+			rows.forEach((row, rowIdx) => {
+				for (let colIdx = 0; colIdx < maxWidth; colIdx++) {
+					const content =
+						colIdx < row.cellContents.length
+							? row.cellContents[colIdx]
+							: "";
+
+					const cellEl = container.createDiv();
+					cellEl.addClass(
+						"tilegrid",
+						"cell",
+						(rowIdx + colIdx) % 2 === 0 ? "light" : "dark"
+					);
+					cellEl.style.setProperty(
+						"grid-column-start",
+						(colIdx + 1).toString()
+					);
+					cellEl.style.setProperty(
+						"grid-column-end",
+						(colIdx + 1).toString()
+					);
+					cellEl.style.setProperty(
+						"grid-row-start",
+						(rowIdx + 1).toString()
+					);
+					cellEl.style.setProperty(
+						"grid-row-end",
+						(rowIdx + 1).toString()
+					);
+					const emojiUnicode = getEmojiUnicode(content);
+					if (emojiUnicode) {
+						const imageEl = cellEl.createEl("img");
+						imageEl.addClass("tilegrid");
+						imageEl.src = `https://twitter.github.io/twemoji/v/13.1.0/svg/${emojiUnicode}.svg`;
+					} else if (content.startsWith("http")) {
+						const imageEl = cellEl.createEl("img");
+						imageEl.addClass("tilegrid");
+						imageEl.src = content;
+					} else {
+						cellEl.setText(content);
+					}
+				}
+			});
+		} catch (e) {
+			console.error(`Obsidian Tile Grid Error:\n${e}`);
+			const pre = createEl("pre");
+			pre.setText(`\`\`\`tiles
+There was an error rendering the tiles:
+${e.stack
+	.split("\n")
+	.filter((line: string) => !/^at/.test(line?.trim()))
+	.join("\n")}
+\`\`\``);
+		}
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
+function getEmojiUnicode(input: string) {
+	const raw = (input: string) => {
+		if (input.length === 1) {
+			return input.charCodeAt(0).toString();
+		} else if (input.length > 1) {
+			const pairs = [];
+			for (let i = 0; i < input.length; i++) {
+				if (
+					// high surrogate
+					input.charCodeAt(i) >= 0xd800 &&
+					input.charCodeAt(i) <= 0xdbff
+				) {
+					if (
+						input.charCodeAt(i + 1) >= 0xdc00 &&
+						input.charCodeAt(i + 1) <= 0xdfff
+					) {
+						// low surrogate
+						pairs.push(
+							(input.charCodeAt(i) - 0xd800) * 0x400 +
+								(input.charCodeAt(i + 1) - 0xdc00) +
+								0x10000
+						);
+					}
+				} else if (
+					input.charCodeAt(i) < 0xd800 ||
+					input.charCodeAt(i) > 0xdfff
+				) {
+					// modifiers and joiners
+					pairs.push(input.charCodeAt(i));
+				}
+			}
+			return pairs.join(" ");
+		}
+
+		return "";
+	};
+
+	if (!input.match(/\p{Emoji}/u)) {
+		return undefined;
 	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					console.log('Secret: ' + value);
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+	return raw(input)
+		.split(" ")
+		.map((val: string) => parseInt(val).toString(16))
+		.join(" ");
 }
